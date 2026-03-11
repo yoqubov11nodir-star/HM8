@@ -1,5 +1,5 @@
 from rest_framework import serializers, status
-from .models import CodeVerifiy, CustomUser, VIA_EMAIL, VIA_PHONE
+from .models import CodeVerifiy, CustomUser, VIA_EMAIL, VIA_PHONE, CODE_VERIFIY, DONE
 from rest_framework.exceptions import ValidationError
 from shared.utility import check_email_or_phone
 from django.db.models import Q
@@ -38,6 +38,7 @@ class SignupSerialzier(serializers.ModelSerializer):
             code = user.generate_code(VIA_PHONE)
             print(f"SMS code for {user.phone_number}: {code}")
 
+        user.save()
         return user
 
     def validate(self, attrs):
@@ -66,3 +67,49 @@ class SignupSerialzier(serializers.ModelSerializer):
         data['refresh'] = instance.token()['refresh']
         data['access'] = instance.token()['access']
         return data
+    
+class UserChangeInfoSerializer(serializers.Serializer):
+    first_name = serializers.CharField(required=True)
+    last_name = serializers.CharField(required=True)
+    username = serializers.CharField(required=True)
+    password = serializers.CharField(required=True)
+    confirm_password = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+        return attrs
+    
+    def validate_username(self, value):
+        if not value.isalnum() and '_' not in value:
+            raise ValidationError("Username faqat harf, raqam va pastki chiziqdan iborat bo'lishi kerak.")
+        
+        if len(value) < 5:
+            raise ValidationError("Username kamida 5 ta belgidan iborat bo'lishi kerak.")
+
+        if CustomUser.objects.filter(username=value).exists():
+            raise ValidationError("Bu username band. Iltimos, boshqasini tanlang.")
+        
+        return value
+
+    def validate_first_name(self, value):
+        if any(char.isdigit() for char in value):
+            raise ValidationError("Ismda raqamlar ishlatilishi mumkin emas.")
+        
+        return value.strip()
+
+    def validate_last_name(self, value):
+        if any(char.isdigit() for char in value):
+            raise ValidationError("Familiyada raqamlar ishlatilishi mumkin emas.")
+        
+        return value.strip()
+
+    def update(self, instance, validated_data):
+        instance.first_name = validated_data.get('first_name')
+        instance.last_name = validated_data.get('last_name')
+        instance.username = validated_data.get('username')
+        instance.password.set_password(validated_data.get('password'))
+        if instance.auth_status != CODE_VERIFIY:
+            raise ValidationError({"message": "Siz hali tasdiqlanmagansiz", "status": status.HTTP_400_BAD_REQUEST})
+        instance.auth_status = DONE
+        instance.save()
+
+        return instance
